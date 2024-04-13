@@ -76,10 +76,11 @@ contract DSCEngine is ReentrancyGuard {
     //// Events  ////
     ////////////////
     event CollateralDeposited(address indexed user, address indexed token, uint256 indexed amount);
-
+    event CollateralRedeemed(address indexed user, address indexed token, uint256 indexed amount);
     ////////////////////
     //// Modifiers  ////
     ////////////////////
+
     modifier moreThanZero(uint256 amount) {
         if (amount == 0) {
             revert DSCEngine__MustMoreThenZero();
@@ -113,46 +114,35 @@ contract DSCEngine is ReentrancyGuard {
     //// external Functions ////
     ////////////////////////////
 
-    function depositCollateralAndMintDsc() external {}
-
     /*
      * @param tokenCollateralAddress: The ERC20 token address of the collateral you're depositing
      * @param amountCollateral: The amount of collateral you're depositing
-     */
-    function depositCollateral(address tokenCollateralAddress, uint256 amountCollateral)
-        external
-        moreThanZero(amountCollateral)
-        isAllowedToken(tokenCollateralAddress)
-        nonReentrant
-    {
-        s_collateralDeposited[msg.sender][tokenCollateralAddress] += amountCollateral;
-        emit CollateralDeposited(msg.sender, tokenCollateralAddress, amountCollateral);
-        bool success = IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), amountCollateral);
-        if (!success) {
-            revert DSCEngine__TransferFailed();
-        }
+     * @param amountDscToMint: The amount of DSC you want to mint
+     * @notice this function will deposit your collateral and mint DSC in one transaction
+    */
+    function depositCollateralAndMintDsc(
+        address tokenCollateralAddress,
+        uint256 amountCollateral,
+        uint256 amountDsctoMint
+    ) external {
+        depositCollateral(tokenCollateralAddress, amountCollateral);
+        mintDsc(amountDsctoMint);
     }
-
-    function redeemCollateralForDsc() external {}
-
-    function redeemCollateral() external {}
 
     /*
-    * @param amountDscToMint: The amount of DSC you want to mint
-    *  @notice they must have more collateral value than the minimum threshold
-     * You can only mint DSC if you hav enough collateral
+     * @param tokenCollateralAddress: The ERC20 token address of the collateral you're redeeming
+     * @param amountCollateral: The amount of collateral you're redeeming
+     * @param burnAmountDsc: the amount of DSC you want ot burn
+     * @notice This function will redeem your collateral.
+     * @notice If you have DSC minted, you will not be able to redeem until you burn your DSC
+     * @notice this burns DSC and redeems collateral in one transaction
      */
-    function mintDsc(uint256 amountDsctoMint) external {
-        s_DSCMinted[msg.sender] += amountDsctoMint;
-        // if they minted to much ($150 DSC,$100 ETH)
-        _revertIfHealthFactorIsBroken(msg.sender);
-        bool minted = i_dsc.mint(msg.sender, amountDsctoMint);
-        if (!minted) {
-            revert DSCEngine__MintedFailed();
-        }
+    function redeemCollateralForDsc(address tokenCollateralAddress, uint256 amountCollateral, uint256 burnAmountDsc)
+        external
+    {
+        burnDsc(burnAmountDsc);
+        redeemCollateral(tokenCollateralAddress, amountCollateral);
     }
-
-    function burnDsc() external {}
 
     function liquidate() external {}
 
@@ -177,6 +167,8 @@ contract DSCEngine is ReentrancyGuard {
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
         uint256 collateralAdjustForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
 
+        // $1000 ETH / $100 DSC
+        // 1000 * 50 = 50000 / 100 = (500 / 100) > 1
         return (collateralAdjustForThreshold * PRECISION) / totalDscMinted;
     }
 
@@ -192,6 +184,72 @@ contract DSCEngine is ReentrancyGuard {
     ////////////////////////////
     //// Public Functions //////
     ////////////////////////////
+
+    /*
+     * @param tokenCollateralAddress: The ERC20 token address of the collateral you're depositing
+     * @param amountCollateral: The amount of collateral you're depositing
+     */
+    function depositCollateral(address tokenCollateralAddress, uint256 amountCollateral)
+        public
+        moreThanZero(amountCollateral)
+        isAllowedToken(tokenCollateralAddress)
+        nonReentrant
+    {
+        s_collateralDeposited[msg.sender][tokenCollateralAddress] += amountCollateral;
+        emit CollateralDeposited(msg.sender, tokenCollateralAddress, amountCollateral);
+        bool success = IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), amountCollateral);
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+    }
+
+    /*
+    * @param amountDscToMint: The amount of DSC you want to mint
+    *  @notice they must have more collateral value than the minimum threshold
+     * You can only mint DSC if you hav enough collateral
+     */
+    function mintDsc(uint256 amountDsctoMint) public {
+        s_DSCMinted[msg.sender] += amountDsctoMint;
+        // if they minted to much ($150 DSC,$100 ETH)
+        _revertIfHealthFactorIsBroken(msg.sender);
+        bool minted = i_dsc.mint(msg.sender, amountDsctoMint);
+        if (!minted) {
+            revert DSCEngine__MintedFailed();
+        }
+    }
+
+    /*
+     * @param tokenCollateralAddress: The ERC20 token address of the collateral you're redeeming
+     * @param amountCollateral: The amount of collateral you're redeeming
+     * @notice This function will redeem your collateral.
+     * @notice If you have DSC minted, you will not be able to redeem until you burn your DSC
+     */
+    function redeemCollateral(address tokenCollateralAddress, uint256 amountCollateral) public {
+        s_collateralDeposited[msg.sender][tokenCollateralAddress] -= amountCollateral;
+        emit CollateralRedeemed(msg.sender, tokenCollateralAddress, amountCollateral);
+        bool success = IERC20(tokenCollateralAddress).transfer(msg.sender, amountCollateral);
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
+    /* 
+     * @param burnAmountDsc: the amount of DSC you want ot burn
+     * @notice careful! You'll burn your DSC here! Make sure you want to do this...
+     * @dev you might want to use this if you're nervous you might get liquidated and want to just burn
+     * you DSC but keep your collateral in.
+     */
+    function burnDsc(uint256 burnAmountDsc) public moreThanZero(burnAmountDsc) {
+        s_DSCMinted[msg.sender] -= burnAmountDsc;
+        bool success = i_dsc.transferFrom(msg.sender, address(this), burnAmountDsc);
+        // This conditonal is hypothtically unreachable
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+        i_dsc.burn(burnAmountDsc);
+        _revertIfHealthFactorIsBroken(msg.sender); // I don't think this would ever hit...
+    }
 
     function getTotalCollateralValue(address user) public view returns (uint256 totalValueInUsd) {
         // loop through each collateral token, get the amount they have deposited, and map it to the price , to get the USD value
