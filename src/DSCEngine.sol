@@ -55,6 +55,7 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TransferFailed();
     error DSCEngine__BreaksHealthFactor(uint256 healthFactor);
     error DSCEngine__MintedFailed();
+    error DSCEngine__HealthFactorIsOk();
 
     /////////////////////////
     //// State variables ////
@@ -64,6 +65,7 @@ contract DSCEngine is ReentrancyGuard {
     uint256 private constant LIQUIDATION_THRESHOLD = 50; // 200% overcollateralized
     uint256 private constant LIQUIDATION_PRECISION = 100;
     uint256 private constant MIN_HEALTH_FACTOR = 1;
+    uint256 private constant LIQUIDATION_BOUNS = 10;
 
     mapping(address token => address priceFeed) private s_priceFeeds;
     mapping(address user => mapping(address token => uint256 amount)) private s_collateralDeposited;
@@ -144,7 +146,44 @@ contract DSCEngine is ReentrancyGuard {
         redeemCollateral(tokenCollateralAddress, amountCollateral);
     }
 
-    function liquidate() external {}
+    /*
+     * @param collateral : The erc20 collateral address to liquidate from the user
+     * This is collateral that you're going to take from the user who is insolvent.
+     * @param user : The user who has broken the health factor. Their _healthFactor should 
+       be below MIN_HEALTH_FACTOR
+     * @param debtToCover : The amount of DSC you want to burn to improve the users health factor
+
+     * @notice : You can partially liquidate a user.
+     * @notice : This function working assumes the protocol will be roughly 200% overcollaterlized 
+       in order for this to work.
+     * @notice : A known bug would be if the protocol were 100% or less collaterlized,then we wouldn't
+        be able to incentive the liquidators.
+     * For example, if the price of the collateral plummeted before anyone could be liquidated.
+    */
+    function liquidate(address collateral, address user, uint256 debtToCover)
+        external
+        moreThanZero(debtToCover)
+        nonReentrant
+    {
+        // need to check health factor of the user
+        uint256 startingUserHealthFactor = _healthFactor(msg.sender);
+        if (startingUserHealthFactor >= MIN_HEALTH_FACTOR) {
+            revert DSCEngine__HealthFactorIsOk();
+        }
+        // We want to burn their DSC "debt"
+        // And take their collateral
+        // Bad User : $150 ETH , $100 DSC
+        // debtTocover = $100
+        // $100 od DSC == ?? ETH?
+        // $100 / $2000 = 0.05 ETH
+        uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(collateral, debtToCover);
+        // And give them a 10% bonus
+        // So we are giving the liquidator $110 of WETH for 100 DSC
+        // We sholud implement a feature to liquidate in the event the protocol is insolvent
+        // And sweep extra amounts into a treasury
+        uint256 bounsCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BOUNS) / LIQUIDATION_PRECISION;
+        uint256 totalCollateralToRedeem = tokenAmountFromDebtCovered + bounsCollateral;
+    }
 
     function getHealthFactor() external view {}
 
@@ -267,5 +306,15 @@ contract DSCEngine is ReentrancyGuard {
         // 1 ETH = $3000
         // The returned value from CL will be 1000 * 1e8
         return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
+    }
+
+    function getTokenAmountFromUsd(address token, uint256 usdAmountInWei) public view returns (uint256) {
+        // price of ETH (token)
+        // $/ETH ETH ??
+        // $2000 / ETH. $1000 = 0.5 ETH
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
+        (, int256 price,,,) = priceFeed.latestRoundData();
+        // (1000e18 * 1e18) / (2000e8 * 1e10) = 0.5000000000000000000
+        return (usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION);
     }
 }
