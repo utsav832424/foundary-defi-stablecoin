@@ -56,6 +56,7 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__BreaksHealthFactor(uint256 healthFactor);
     error DSCEngine__MintedFailed();
     error DSCEngine__HealthFactorIsOk();
+    error DSCEngine__HealthFactorNotImproved();
 
     /////////////////////////
     //// State variables ////
@@ -78,7 +79,9 @@ contract DSCEngine is ReentrancyGuard {
     //// Events  ////
     ////////////////
     event CollateralDeposited(address indexed user, address indexed token, uint256 indexed amount);
-    event CollateralRedeemed(address indexed user, address indexed token, uint256 indexed amount);
+    event CollateralRedeemed(
+        address indexed redeemFrom, address indexed redeemTo, address indexed token, uint256 amount
+    );
     ////////////////////
     //// Modifiers  ////
     ////////////////////
@@ -183,6 +186,15 @@ contract DSCEngine is ReentrancyGuard {
         // And sweep extra amounts into a treasury
         uint256 bounsCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BOUNS) / LIQUIDATION_PRECISION;
         uint256 totalCollateralToRedeem = tokenAmountFromDebtCovered + bounsCollateral;
+        _redeemCollateral(user, msg.sender, collateral, totalCollateralToRedeem);
+        // We need to burn dsc
+        _burnDsc(debtToCover, user, msg.sender);
+
+        uint256 endingUserHealthfactor = _healthFactor(user);
+        if (endingUserHealthfactor <= MIN_HEALTH_FACTOR) {
+            revert DSCEngine__HealthFactorNotImproved();
+        }
+        _revertIfHealthFactorIsBroken(msg.sender);
     }
 
     function getHealthFactor() external view {}
@@ -190,6 +202,28 @@ contract DSCEngine is ReentrancyGuard {
     ////////////////////////////
     //// internal Functions ////
     ////////////////////////////
+
+    function _redeemCollateral(address from, address to, address tokenCollateralAddress, uint256 amountCollateral)
+        private
+    {
+        s_collateralDeposited[from][tokenCollateralAddress] -= amountCollateral;
+        emit CollateralRedeemed(from, to, tokenCollateralAddress, amountCollateral);
+        bool success = IERC20(tokenCollateralAddress).transfer(to, amountCollateral);
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+    }
+
+    function _burnDsc(uint256 burnAmountDsc, address onBehalfOf, address dscFrom) public moreThanZero(burnAmountDsc) {
+        s_DSCMinted[onBehalfOf] -= burnAmountDsc;
+        bool success = i_dsc.transferFrom(dscFrom, address(this), burnAmountDsc);
+        // This conditonal is hypothtically unreachable
+        if (!success) {
+            revert DSCEngine__TransferFailed();
+        }
+        i_dsc.burn(burnAmountDsc);
+    }
+
     function _getAccountInformation(address user)
         private
         view
@@ -264,12 +298,7 @@ contract DSCEngine is ReentrancyGuard {
      * @notice If you have DSC minted, you will not be able to redeem until you burn your DSC
      */
     function redeemCollateral(address tokenCollateralAddress, uint256 amountCollateral) public {
-        s_collateralDeposited[msg.sender][tokenCollateralAddress] -= amountCollateral;
-        emit CollateralRedeemed(msg.sender, tokenCollateralAddress, amountCollateral);
-        bool success = IERC20(tokenCollateralAddress).transfer(msg.sender, amountCollateral);
-        if (!success) {
-            revert DSCEngine__TransferFailed();
-        }
+        _redeemCollateral(msg.sender, msg.sender, tokenCollateralAddress, amountCollateral);
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -280,13 +309,7 @@ contract DSCEngine is ReentrancyGuard {
      * you DSC but keep your collateral in.
      */
     function burnDsc(uint256 burnAmountDsc) public moreThanZero(burnAmountDsc) {
-        s_DSCMinted[msg.sender] -= burnAmountDsc;
-        bool success = i_dsc.transferFrom(msg.sender, address(this), burnAmountDsc);
-        // This conditonal is hypothtically unreachable
-        if (!success) {
-            revert DSCEngine__TransferFailed();
-        }
-        i_dsc.burn(burnAmountDsc);
+        _burnDsc(burnAmountDsc, msg.sender, msg.sender);
         _revertIfHealthFactorIsBroken(msg.sender); // I don't think this would ever hit...
     }
 
