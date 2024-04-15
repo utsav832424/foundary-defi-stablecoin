@@ -231,7 +231,6 @@ contract DSCEngine is ReentrancyGuard {
     {
         totalDscMinted = s_DSCMinted[user];
         collateralValueInUsd = getTotalCollateralValue(user);
-        return (totalDscMinted, collateralValueInUsd);
     }
 
     function _healthFactor(address user) private view returns (uint256) {
@@ -316,7 +315,7 @@ contract DSCEngine is ReentrancyGuard {
     function getTotalCollateralValue(address user) public view returns (uint256 totalValueInUsd) {
         // loop through each collateral token, get the amount they have deposited, and map it to the price , to get the USD value
         for (uint256 i = 0; i < s_collateralTokens.length; i++) {
-            address token = s_priceFeeds[user];
+            address token = s_collateralTokens[i];
             uint256 amount = s_collateralDeposited[user][token];
             totalValueInUsd += getValueInUsd(token, amount);
         }
@@ -339,5 +338,20 @@ contract DSCEngine is ReentrancyGuard {
         (, int256 price,,,) = priceFeed.latestRoundData();
         // (1000e18 * 1e18) / (2000e8 * 1e10) = 0.5000000000000000000
         return (usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION);
+    }
+
+    function getAccountInformation(address user)
+        external
+        view
+        returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
+    {
+        (totalDscMinted, collateralValueInUsd) = _getAccountInformation(user);
+    }
+
+    ////////////////////////////
+    //// Getter Functions //////
+    ////////////////////////////
+    function getS_PriceFeed(address user) external view returns (address) {
+        return s_priceFeeds[user];
     }
 }
