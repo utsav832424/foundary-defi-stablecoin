@@ -20,7 +20,9 @@ contract DSCEngineTest is Test {
 
     address public USER = makeAddr("user");
     uint256 public constant AMOUNT_COLLATERAL = 10 ether;
+    uint256 public constant AMOUNT = 10 ether;
     uint256 public constant STARTING_ERC20_BALANCE = 10 ether;
+    uint256 public constant amountTomint = 100 ether;
 
     function setUp() public {
         deployer = new DeployDSC();
@@ -64,8 +66,16 @@ contract DSCEngineTest is Test {
         assertEq(expectedAmont, actualAmount);
     }
 
+    function testGetAccountInformaion() public {
+        vm.startPrank(USER);
+        (uint256 totalDScMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(USER);
+        assertEq(0, totalDScMinted);
+        assertEq(0, collateralValueInUsd);
+        vm.stopPrank();
+    }
+
     ////////////////////////////
-    // deposit collateral dsc //
+    // deposit and mint collateral dsc //
     ////////////////////////////
 
     function testRevertsIfCollateralZero() public {
@@ -89,6 +99,14 @@ contract DSCEngineTest is Test {
         vm.startPrank(USER);
         ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
         dsce.depositCollateral(weth, AMOUNT_COLLATERAL);
+        vm.stopPrank();
+        _;
+    }
+
+    modifier depositCollateralAndMintDsc() {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, amountTomint);
         _;
     }
 
@@ -101,7 +119,73 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
     }
 
-    function testRevertMintDscIfHealthFactorIsNotOk() public {
-        console.log(type(uint256).max);
+    function testDepositCollateralAndMintDsc() public depositCollateral {
+        vm.startPrank(USER);
+        dsce.mintDsc(AMOUNT);
+        assertEq(AMOUNT, dsc.balanceOf(USER));
+        vm.stopPrank();
+    }
+
+    function testRevetsIfMintDscWithoutDepositCollateral() public {
+        vm.startPrank(USER);
+        vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, 0));
+        dsce.mintDsc(AMOUNT);
+        vm.stopPrank();
+    }
+
+    function testGetDscMintedOfUser() public depositCollateral {
+        vm.prank(USER);
+        dsce.mintDsc(AMOUNT);
+        uint256 actualAMount = dsce.getDscMintedOfUser(USER);
+        assertEq(AMOUNT, actualAMount);
+    }
+
+    function testGetCollateralDeposited() public depositCollateral {
+        vm.prank(USER);
+        uint256 actualDepositedValue = dsce.getCollateralDeposited(USER, weth);
+        assertEq(actualDepositedValue, AMOUNT);
+    }
+
+    function testRevertsIfMintDscIsZero() public depositCollateral {
+        vm.startPrank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__MustMoreThenZero.selector);
+        dsce.mintDsc(0);
+        vm.stopPrank();
+    }
+
+    ////////////////////////////
+    // Redeem collateral dsc ///
+    ////////////////////////////
+
+    function testRevertsIfRedeemAmountIsZero() public depositCollateral {
+        vm.startPrank(USER);
+        dsce.mintDsc(AMOUNT_COLLATERAL);
+        vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, 0));
+        dsce.redeemCollateral(weth, AMOUNT);
+        vm.stopPrank();
+    }
+
+    function testCanRedeemCollateral() public depositCollateralAndMintDsc {
+        vm.startPrank(USER);
+        dsce.redeemCollateral(weth, 9e18);
+        vm.stopPrank();
+    }
+
+    function testBurnDsc() public depositCollateralAndMintDsc {
+        vm.startPrank(USER);
+        dsc.approve(address(dsce), amountTomint);
+        dsce.burnDsc(amountTomint);
+        uint256 balAfterBurn = dsce.getDscMintedOfUser(USER);
+        assertEq(balAfterBurn, 0);
+        vm.stopPrank();
+    }
+
+    function testRevertsIfBurnDscAmountIsZero() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, amountTomint);
+        vm.expectRevert(DSCEngine.DSCEngine__MustMoreThenZero.selector);
+        dsce.burnDsc(0);
+        vm.stopPrank();
     }
 }

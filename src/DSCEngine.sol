@@ -27,6 +27,7 @@ import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {console} from "forge-std/console.sol";
 
 /**
  * @title DSCEngine
@@ -197,8 +198,6 @@ contract DSCEngine is ReentrancyGuard {
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
-    function getHealthFactor() external view {}
-
     ////////////////////////////
     //// internal Functions ////
     ////////////////////////////
@@ -237,6 +236,8 @@ contract DSCEngine is ReentrancyGuard {
         // total dsc minted
         // total collateral value
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
+        if (totalDscMinted == 0) return type(uint256).max;
+
         uint256 collateralAdjustForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
 
         // $1000 ETH / $100 DSC
@@ -280,7 +281,7 @@ contract DSCEngine is ReentrancyGuard {
     *  @notice they must have more collateral value than the minimum threshold
      * You can only mint DSC if you hav enough collateral
      */
-    function mintDsc(uint256 amountDsctoMint) public {
+    function mintDsc(uint256 amountDsctoMint) public moreThanZero(amountDsctoMint) {
         s_DSCMinted[msg.sender] += amountDsctoMint;
         // if they minted to much ($150 DSC,$100 ETH)
         _revertIfHealthFactorIsBroken(msg.sender);
@@ -327,6 +328,7 @@ contract DSCEngine is ReentrancyGuard {
         (, int256 price,,,) = priceFeed.latestRoundData();
         // 1 ETH = $3000
         // The returned value from CL will be 1000 * 1e8
+
         return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
     }
 
@@ -353,5 +355,19 @@ contract DSCEngine is ReentrancyGuard {
     ////////////////////////////
     function getS_PriceFeed(address user) external view returns (address) {
         return s_priceFeeds[user];
+    }
+
+    function CalculateHealthFactor(address user) external view returns (uint256) {
+        // total dsc minted
+        // total collateral value
+        return _healthFactor(user);
+    }
+
+    function getDscMintedOfUser(address user) external view returns (uint256) {
+        return s_DSCMinted[user];
+    }
+
+    function getCollateralDeposited(address user, address token) external view returns (uint256) {
+        return s_collateralDeposited[user][token];
     }
 }
