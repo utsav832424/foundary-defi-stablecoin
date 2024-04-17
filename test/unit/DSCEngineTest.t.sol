@@ -7,6 +7,7 @@ import {HelperConfig} from "../../script/HelperConfig.s.sol";
 import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {DSCEngine} from "../../src/DSCEngine.sol";
 import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
+import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
 
 contract DSCEngineTest is Test {
     DeployDSC deployer;
@@ -19,10 +20,12 @@ contract DSCEngineTest is Test {
     address wbtc;
 
     address public USER = makeAddr("user");
+    address public liquidator = makeAddr("liquidator");
     uint256 public constant AMOUNT_COLLATERAL = 10 ether;
     uint256 public constant AMOUNT = 10 ether;
     uint256 public constant STARTING_ERC20_BALANCE = 10 ether;
     uint256 public constant amountTomint = 100 ether;
+    uint256 public constant collateralTocover = 20 ether;
 
     function setUp() public {
         deployer = new DeployDSC();
@@ -74,9 +77,9 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
     }
 
-    ////////////////////////////
+    /////////////////////////////////////
     // deposit and mint collateral dsc //
-    ////////////////////////////
+    /////////////////////////////////////
 
     function testRevertsIfCollateralZero() public {
         vm.startPrank(USER);
@@ -107,6 +110,7 @@ contract DSCEngineTest is Test {
         vm.startPrank(USER);
         ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
         dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, amountTomint);
+        vm.stopPrank();
         _;
     }
 
@@ -187,5 +191,41 @@ contract DSCEngineTest is Test {
         vm.expectRevert(DSCEngine.DSCEngine__MustMoreThenZero.selector);
         dsce.burnDsc(0);
         vm.stopPrank();
+    }
+
+    /////////////////////
+    // liquidate tests //
+    ////////////////////
+
+    function testliquidated() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, amountTomint);
+        vm.stopPrank();
+
+        int256 ethUsdUpdatePrice = 18e8;
+
+        MockV3Aggregator(ethUsdPriceFeed).updateAnswer(ethUsdUpdatePrice);
+        uint256 userhealthfactor = dsce.getCalculateHealthFactor(USER);
+        console.log("userhealthfactor ", userhealthfactor);
+        ERC20Mock(weth).mint(liquidator, collateralTocover);
+
+        vm.startPrank(liquidator);
+        ERC20Mock(weth).approve(address(dsce), collateralTocover);
+        dsce.depositCollateralAndMintDsc(weth, collateralTocover, amountTomint);
+        dsc.approve(address(dsce), amountTomint);
+        dsce.liquidate(weth, USER, amountTomint);
+        vm.stopPrank();
+    }
+
+    function testRevertsIfStratingHealthFactorIsOk() public depositCollateralAndMintDsc {
+        vm.prank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__HealthFactorIsOk.selector);
+        dsce.liquidate(weth, USER, amountTomint);
+    }
+
+    function testCanLiquidate() public {
+        vm.prank(liquidator);
+        dsce.liquidate(weth, USER, 100e18);
     }
 }

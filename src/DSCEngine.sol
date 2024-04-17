@@ -170,7 +170,7 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant
     {
         // need to check health factor of the user
-        uint256 startingUserHealthFactor = _healthFactor(msg.sender);
+        uint256 startingUserHealthFactor = _healthFactor(user);
         if (startingUserHealthFactor >= MIN_HEALTH_FACTOR) {
             revert DSCEngine__HealthFactorIsOk();
         }
@@ -198,9 +198,9 @@ contract DSCEngine is ReentrancyGuard {
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
-    ////////////////////////////
-    //// internal Functions ////
-    ////////////////////////////
+    //////////////////////////////////////
+    //// internal & private Functions ////
+    //////////////////////////////////////
 
     function _redeemCollateral(address from, address to, address tokenCollateralAddress, uint256 amountCollateral)
         private
@@ -357,7 +357,7 @@ contract DSCEngine is ReentrancyGuard {
         return s_priceFeeds[user];
     }
 
-    function CalculateHealthFactor(address user) external view returns (uint256) {
+    function getCalculateHealthFactor(address user) external view returns (uint256) {
         // total dsc minted
         // total collateral value
         return _healthFactor(user);
