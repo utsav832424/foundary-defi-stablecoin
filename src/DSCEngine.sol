@@ -66,7 +66,7 @@ contract DSCEngine is ReentrancyGuard {
     uint256 private constant PRECISION = 1e18;
     uint256 private constant LIQUIDATION_THRESHOLD = 50; // 200% overcollateralized
     uint256 private constant LIQUIDATION_PRECISION = 100;
-    uint256 private constant MIN_HEALTH_FACTOR = 1;
+    uint256 private constant MIN_HEALTH_FACTOR = 1e18;
     uint256 private constant LIQUIDATION_BOUNS = 10;
 
     mapping(address token => address priceFeed) private s_priceFeeds;
@@ -192,7 +192,7 @@ contract DSCEngine is ReentrancyGuard {
         _burnDsc(debtToCover, user, msg.sender);
 
         uint256 endingUserHealthfactor = _healthFactor(user);
-        if (endingUserHealthfactor <= MIN_HEALTH_FACTOR) {
+        if (endingUserHealthfactor <= startingUserHealthFactor) {
             revert DSCEngine__HealthFactorNotImproved();
         }
         _revertIfHealthFactorIsBroken(msg.sender);
@@ -369,5 +369,9 @@ contract DSCEngine is ReentrancyGuard {
 
     function getCollateralDeposited(address user, address token) external view returns (uint256) {
         return s_collateralDeposited[user][token];
+    }
+
+    function getLiquidationBonus() external pure returns (uint256) {
+        return LIQUIDATION_BOUNS;
     }
 }

@@ -206,8 +206,7 @@ contract DSCEngineTest is Test {
         int256 ethUsdUpdatePrice = 18e8;
 
         MockV3Aggregator(ethUsdPriceFeed).updateAnswer(ethUsdUpdatePrice);
-        uint256 userhealthfactor = dsce.getCalculateHealthFactor(USER);
-        console.log("userhealthfactor ", userhealthfactor);
+
         ERC20Mock(weth).mint(liquidator, collateralTocover);
 
         vm.startPrank(liquidator);
@@ -218,14 +217,39 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
     }
 
+    modifier liquidated() {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, amountTomint);
+        vm.stopPrank();
+
+        int256 ethUsdUpdatePrice = 18e8;
+
+        MockV3Aggregator(ethUsdPriceFeed).updateAnswer(ethUsdUpdatePrice);
+
+        ERC20Mock(weth).mint(liquidator, collateralTocover);
+
+        vm.startPrank(liquidator);
+        ERC20Mock(weth).approve(address(dsce), collateralTocover);
+        dsce.depositCollateralAndMintDsc(weth, collateralTocover, amountTomint);
+        dsc.approve(address(dsce), amountTomint);
+        dsce.liquidate(weth, USER, amountTomint);
+        vm.stopPrank();
+        _;
+    }
+
+    function testLiquidationPayoutIsCorrect() public liquidated {
+        uint256 liquidatorWethBalance = ERC20Mock(weth).balanceOf(liquidator);
+        uint256 expectedWeth = dsce.getTokenAmountFromUsd(weth, amountTomint)
+            + (dsce.getTokenAmountFromUsd(weth, amountTomint) / dsce.getLiquidationBonus());
+        uint256 hardCodedExpected = 6_111_111_111_111_111_110;
+        assertEq(liquidatorWethBalance, hardCodedExpected);
+        assertEq(liquidatorWethBalance, expectedWeth);
+    }
+
     function testRevertsIfStratingHealthFactorIsOk() public depositCollateralAndMintDsc {
         vm.prank(USER);
         vm.expectRevert(DSCEngine.DSCEngine__HealthFactorIsOk.selector);
         dsce.liquidate(weth, USER, amountTomint);
-    }
-
-    function testCanLiquidate() public {
-        vm.prank(liquidator);
-        dsce.liquidate(weth, USER, 100e18);
     }
 }
