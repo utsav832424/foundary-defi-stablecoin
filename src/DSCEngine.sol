@@ -28,6 +28,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import {console} from "forge-std/console.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
 
 /**
  * @title DSCEngine
@@ -62,6 +63,8 @@ contract DSCEngine is ReentrancyGuard {
     /////////////////////////
     //// State variables ////
     /////////////////////////
+    using OracleLib for AggregatorV3Interface;
+
     uint256 private constant ADDITIONAL_FEED_PRECISION = 1e10;
     uint256 private constant PRECISION = 1e18;
     uint256 private constant LIQUIDATION_THRESHOLD = 50; // 200% overcollateralized
@@ -297,7 +300,12 @@ contract DSCEngine is ReentrancyGuard {
      * @notice This function will redeem your collateral.
      * @notice If you have DSC minted, you will not be able to redeem until you burn your DSC
      */
-    function redeemCollateral(address tokenCollateralAddress, uint256 amountCollateral) public {
+    function redeemCollateral(address tokenCollateralAddress, uint256 amountCollateral)
+        public
+        moreThanZero(amountCollateral)
+        nonReentrant
+        isAllowedToken(tokenCollateralAddress)
+    {
         _redeemCollateral(msg.sender, msg.sender, tokenCollateralAddress, amountCollateral);
         _revertIfHealthFactorIsBroken(msg.sender);
     }
@@ -373,5 +381,9 @@ contract DSCEngine is ReentrancyGuard {
 
     function getLiquidationBonus() external pure returns (uint256) {
         return LIQUIDATION_BOUNS;
+    }
+
+    function getCollateralTokens() external view returns (address[] memory) {
+        return s_collateralTokens;
     }
 }

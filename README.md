@@ -14,3 +14,8 @@ This Project is to create a Defi Stablecoin. It is similar to DAI if DAI had no 
 3. Collateral: Exogenous (Crypto)
     1. wETH
     2. wBTC        
+
+## Deployment
+
+- DSC Stablecoin Contract Address: **0x417fEb4074767B3fE846b80BeC5864BDa183e63f**
+- Sepolia Testnet Explorer: **[https://sepolia.etherscan.io]**
