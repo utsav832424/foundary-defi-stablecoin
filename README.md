@@ -1,4 +1,4 @@
-# Defi Satblecoin
+# Defi Stablecoin
 
 ## About
 
